@@ -8,7 +8,16 @@ import (
 )
 
 var connNum int = 0
-var connPool [10]*websocket.Conn
+var connPool [1000]*websocket.Conn
+
+type Message struct {
+	Num  int
+	Type string
+	Text string
+}
+
+const MESSAGE_ACK = "ACK"
+const MESSAGE_NORMAL = "NORMAL"
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -21,32 +30,53 @@ func homePage(w http.ResponseWriter, r *http.Request) {
 
 func wsEndpoint(w http.ResponseWriter, r *http.Request) {
 
+	msg := make(chan bool)
+
 	var err error
+	var conn *websocket.Conn
+
+	conn, err = upgrader.Upgrade(w, r, nil)
 
 	connNum++
-	connPool[connNum], err = upgrader.Upgrade(w, r, nil)
+	var inx int
+	inx = connNum
+	connPool[inx] = conn
 
 	if err != nil {
 		panic(err)
 	}
 
+	connPool[inx].WriteJSON(Message{
+		Num:  inx,
+		Type: MESSAGE_ACK,
+		Text: "",
+	})
+
 	go func() {
 		for {
-			_, message, err := connPool[connNum].ReadMessage()
+			_, message, err := connPool[inx].ReadMessage()
 			if err != nil {
 				panic(err)
 			}
 
 			messageText := string(message)
-			messageText = fmt.Sprintf("#%d: %s", connNum, messageText)
+			messageText = fmt.Sprintf("#%d: %s", inx, messageText)
 
-			for i := 0; i <= connNum; i++ {
-				connPool[connNum].WriteMessage(websocket.TextMessage, []byte(messageText))
+			for i := 1; i <= connNum; i++ {
+				connPool[i].WriteJSON(Message{
+					Num:  inx,
+					Type: MESSAGE_NORMAL,
+					Text: messageText,
+				})
 			}
 
 			fmt.Println(messageText)
 		}
+
+		msg <- true
 	}()
+
+	<-msg
 }
 
 func main() {
